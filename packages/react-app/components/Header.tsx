@@ -1,93 +1,154 @@
 import { Disclosure } from "@headlessui/react";
 import { Bars3Icon, XMarkIcon } from "@heroicons/react/24/outline";
-import {
-    useCelo,
-  } from '@celo/react-celo';
-import Image from "next/image";
-import { useEffect, useState } from "react";
+import { shortenAddress } from "@/utils/shortenAddress";
+import { StableToken } from "@celo/contractkit/lib/celo-tokens";
+import { StableTokenWrapper } from "@celo/contractkit/lib/wrappers/StableTokenWrapper";
+import { Summary } from "@/typings";
+import { useCallback, useEffect, useState } from "react";
+import { useCelo } from "@celo/react-celo";
+import { BigNumber } from "bignumber.js";
+import Web3 from "web3";
+
+const defaultSummary: Summary = {
+  name: "",
+  address: "",
+  celo: new BigNumber(0),
+  balances: [],
+};
+
+
 
 export default function Header() {
+  let [componentInitialized, setComponentInitialized] = useState(false);
+  let { initialised, address, connect, disconnect, kit } = useCelo();
 
-    let [componentInitialized, setComponentInitialized] = useState(false);
-    let {
-        initialised,
-        address,
-        connect,
-        disconnect
-    } = useCelo();
+  useEffect(() => {
+    if (initialised) {
+      setComponentInitialized(true);
+    }
+  }, [initialised]);
 
-    useEffect(() => {
-      if (initialised) {
-        setComponentInitialized(true);
-      }
-    }, [initialised]);
+   const [summary, setSummary] = useState<Summary>(defaultSummary);
+  
+
+   async function getBalances(
+     stableTokens: {
+       symbol: StableToken;
+       contract: StableTokenWrapper | null;
+     }[],
+     address: string
+   ) {
+     return Promise.all(
+       stableTokens.map(async (stable) => {
+         let value, error;
+         if (stable.contract) {
+           value = await stable.contract.balanceOf(address);
+         } else {
+           error = "not deployed in network";
+         }
+         return {
+           symbol: stable.symbol,
+           value: value,
+           error: error,
+         };
+       })
+     );
+   }
+
+   const fetchSummary = useCallback(async () => {
+     if (!address) {
+       setSummary(defaultSummary);
+       return;
+     }
+
+     const [accounts, goldToken, stableTokens] = await Promise.all([
+       kit.contracts.getAccounts(),
+       kit.contracts.getGoldToken(),
+       Promise.all(
+         Object.values(StableToken).map(async (stable) => {
+           let contract;
+           try {
+             contract = await kit.contracts.getStableToken(stable);
+           } catch (e) {
+             contract = null;
+             console.error(e);
+           }
+           return {
+             symbol: stable,
+             contract: contract,
+           };
+         })
+       ),
+     ]);
+
+     const [accountSummary, celo, balances] = await Promise.all([
+       accounts.getAccountSummary(address).catch((e) => {
+         console.error(e);
+         return defaultSummary;
+       }),
+       goldToken.balanceOf(address),
+       getBalances(stableTokens, address),
+     ]);
+
+     setSummary({
+       ...accountSummary,
+       celo,
+       balances,
+     });
+   }, [address, kit]);
+
+   useEffect(() => {
+     void fetchSummary();
+   }, [fetchSummary]);
 
 
-    return (
-      <Disclosure as="nav" className="bg-prosperity border-b border-black">
-        {({ open }) => (
-          <>
-            <div className="mx-auto max-w-7xl px-2 sm:px-6 lg:px-8">
-              <div className="relative flex h-16 justify-between">
-                <div className="absolute inset-y-0 left-0 flex items-center sm:hidden">
-                  {/* Mobile menu button */}
-                  <Disclosure.Button className="inline-flex items-center justify-center rounded-md p-2 text-black focus:outline-none focus:ring-1 focus:ring-inset focus:rounded-none focus:ring-black">
-                    <span className="sr-only">Open main menu</span>
-                    {open ? (
-                      <XMarkIcon className="block h-6 w-6" aria-hidden="true" />
-                    ) : (
-                      <Bars3Icon className="block h-6 w-6" aria-hidden="true" />
-                    )}
-                  </Disclosure.Button>
+
+  return (
+    <Disclosure as="nav" className="">
+      {({ open }) => (
+        <>
+          <div className="mx-auto max-w-7xl px-2 sm:px-6 lg:px-8">
+            <div className="relative w-11/12 mx-auto flex h-16 justify-between">
+              <div className="flex flex-1 items-center justify-start sm:items-stretch sm:justify-start">
+                <div className="flex flex-shrink-0 items-center">
+                  <p className="bg-gradient-to-r from-[#FFC947] to-[#FC6739] text-transparent bg-clip-text">
+                    SwiftSwap
+                  </p>
                 </div>
-                <div className="flex flex-1 items-center justify-center sm:items-stretch sm:justify-start">
-                  <div className="flex flex-shrink-0 items-center">
-                    <Image className="block h-8 w-auto lg:block" src="/logo.svg" width="24" height="24" alt="Celo Logo" />
-                  </div>
-                  <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-                    <a
-                      href="#"
-                      className="inline-flex items-center border-b-2 border-black px-1 pt-1 text-sm font-medium text-gray-900"
-                    >
-                      Home
-                    </a>
-                    
-                  </div>
-                </div>
-                <div className="absolute inset-y-0 right-0 flex items-center pr-2 sm:static sm:inset-auto sm:ml-6 sm:pr-0">
-                  {componentInitialized && address ? (
+              </div>
+              <div className="absolute inset-y-0 right-0 flex items-center pr-2 sm:static sm:inset-auto sm:ml-6 sm:pr-0">
+                {componentInitialized && address ? (
+                  <div className="flex space-x-6">
+                    <div className="">
+                      <p className=" text-white inline-flex content-center place-items-center rounded-full py-2 px-5 text-md font-medium text-snow bg-gray-500/30">
+                        CELO BAL: {Web3.utils.fromWei(summary.celo.toFixed())}
+                      </p>
+                    </div>
+
                     <button
                       type="button"
-                      className="inline-flex content-center place-items-center rounded-full border border-wood bg-black py-2 px-5 text-md font-medium text-snow hover:bg-forest"
+                      className="bg-blue-600 text-white inline-flex content-center place-items-center rounded-full py-2 px-5 text-md font-medium text-snow "
                       onClick={disconnect}
-                    >Disconnect</button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="inline-flex content-center place-items-center rounded-full border border-wood bg-forest py-2 px-5 text-md font-medium text-snow hover:bg-black"
-                      onClick={() =>
-                        connect().catch((e) => console.log((e as Error).message))
-                      }
-                    >Connect</button>
-                  )}
-                </div>
+                    >
+                      {shortenAddress(address)}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="bg-blue-600 text-white inline-flex content-center place-items-center rounded-full py-2 px-5 text-md font-medium text-snow"
+                    onClick={() =>
+                      connect().catch((e) => console.log((e as Error).message))
+                    }
+                  >
+                    Connect Wallet
+                  </button>
+                )}
               </div>
             </div>
-  
-            <Disclosure.Panel className="sm:hidden">
-              <div className="space-y-1 pt-2 pb-4">
-                <Disclosure.Button
-                  as="a"
-                  href="#"
-                  className="block border-l-4 border-black py-2 pl-3 pr-4 text-base font-medium text-black"
-                >
-                  Home
-                </Disclosure.Button>
-                {/* Add here your custom menu elements */}
-              </div>
-            </Disclosure.Panel>
-          </>
-        )}
-      </Disclosure>
-    )
-  }
+          </div>
+        </>
+      )}
+    </Disclosure>
+  );
+}
